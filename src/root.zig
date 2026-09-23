@@ -50,7 +50,7 @@ pub const ParseError = error{
 };
 
 pub const help_text =
-    \\usage: unslop [options] [FILE]
+    \\usage: deslop [options] [FILE]
     \\  when no FILE is provided, context is read from STDIN
     \\
     \\  Default mode:
@@ -67,7 +67,7 @@ pub const help_text =
     \\  -l                    Start LSP server mode (-n and FILE ignored)
     \\  -X                    dumps Json request to stdout and exits
     \\
-    \\  unslop POSTs a /v1/systemone request to the endpoint in $SYSTEMONE_URL.
+    \\  deslop POSTs a /v1/systemone request to the endpoint in $SYSTEMONE_URL.
     \\
     \\  Environment options:
     \\

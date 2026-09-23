@@ -1,18 +1,23 @@
 //! Codec for the TypeSafe /v1/systemone API (see schema/openapi.json).
 //!
-//! unslop is one-shot: it POSTs a `SystemOneRequest` to $SYSTEMONE_URL and
-//! parses the `SystemOneResponse` back out; no agent lifecycle involved.
+//! deslop posts `SystemOneRequest`s to $SYSTEMONE_URL (questions batched at
+//! `max_questions` per request) and parses the `SystemOneResponse`s back out;
+//! no agent lifecycle involved.
 
 const std = @import("std");
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
 
-/// Model alias used when $UNSLOP_MODEL is unset (see GET /v1/models).
+/// Model alias used when $DESLOP_MODEL is unset (see GET /v1/models).
 pub const default_model = "jev-latest";
 
-/// Resolve the /v1/systemone `model` field: $UNSLOP_MODEL or `default_model`.
+/// Questions per request: the /v1/systemone proxy accepts at most 64 per
+/// request (`MAX_QUESTIONS`); we batch at 32 to stay safely under it.
+pub const max_questions: usize = 32;
+
+/// Resolve the /v1/systemone `model` field: $DESLOP_MODEL or `default_model`.
 pub fn modelFromEnv(env: *std.process.Environ.Map) []const u8 {
-    if (env.get("UNSLOP_MODEL")) |m| {
+    if (env.get("DESLOP_MODEL")) |m| {
         if (m.len > 0) return m;
     }
     return default_model;
@@ -48,21 +53,26 @@ const categorical_question =
 
 /// Build a `SystemOneRequest` as a `std.json.Value` tree and serialize it with
 /// `std.json.Stringify` (the library owns all JSON syntax and escaping).
-/// `state` = the whole source, one question per line named `line_N`. Default
-/// mode asks a noul good-vs-bad question per line; with `ladder`, a choice
-/// question restricted to the ladder tags. `only` (from -n) restricts the
-/// request to a single line.
+/// `state` = the whole source; questions are one per line named `line_N` with
+/// absolute 1-based numbering so batches merge trivially. Default mode asks a
+/// noul good-vs-bad question per line; with `ladder`, a choice question
+/// restricted to the ladder tags. `only` (from -n) restricts the request to a
+/// single line. `offset` is the 0-based first line of the batch and `limit`
+/// the maximum number of lines to include; callers batch with `max_questions`.
 pub fn buildRequest(
     arena: Allocator,
     model: []const u8,
     source: []const u8,
     ladder: ?[]const []const u8,
     only: ?u32,
+    offset: usize,
+    limit: usize,
 ) Allocator.Error![]u8 {
     var questions: std.json.ObjectMap = .empty;
     const n = countLines(source);
-    var i: usize = 1;
-    while (i <= n) : (i += 1) {
+    const last = @min(offset +| limit, n);
+    var i: usize = offset + 1;
+    while (i <= last) : (i += 1) {
         if (only) |o| {
             if (o != i) continue;
         }
@@ -200,7 +210,7 @@ test "buildRequest default mode round-trips" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
-    const req = try buildRequest(arena, "m", "a\nb\n", null, null);
+    const req = try buildRequest(arena, "m", "a\nb\n", null, null, 0, max_questions);
     const v = try std.json.parseFromSliceLeaky(std.json.Value, arena, req, .{});
     try std.testing.expectEqualStrings("m", v.object.get("model").?.string);
     try std.testing.expectEqualStrings("a\nb\n", v.object.get("state").?.string);
@@ -216,7 +226,7 @@ test "buildRequest categorical and only" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
-    const req = try buildRequest(arena, "m", "x\ny\nz\n", &.{ "good", "bad" }, 2);
+    const req = try buildRequest(arena, "m", "x\ny\nz\n", &.{ "good", "bad" }, 2, 0, max_questions);
     const v = try std.json.parseFromSliceLeaky(std.json.Value, arena, req, .{});
     const qs = v.object.get("questions").?.object;
     try std.testing.expectEqual(@as(usize, 1), qs.count());
@@ -225,6 +235,22 @@ test "buildRequest categorical and only" {
     const criteria = q.get("criteria").?.object;
     try std.testing.expectEqual(@as(usize, 2), criteria.count());
     try std.testing.expect(criteria.get("good").? == .null);
+}
+
+test "buildRequest batches by offset and limit" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    const req = try buildRequest(arena, "m", "a\nb\nc\nd\n", null, null, 2, 2);
+    const v = try std.json.parseFromSliceLeaky(std.json.Value, arena, req, .{});
+    // state always carries the whole source; only line_3/line_4 are asked.
+    try std.testing.expectEqualStrings("a\nb\nc\nd\n", v.object.get("state").?.string);
+    const qs = v.object.get("questions").?.object;
+    try std.testing.expectEqual(@as(usize, 2), qs.count());
+    try std.testing.expect(qs.get("line_2") == null);
+    try std.testing.expect(qs.get("line_3") != null);
+    try std.testing.expect(qs.get("line_4") != null);
+    try std.testing.expect(qs.get("line_5") == null);
 }
 
 test "parseAnswers noul choice and filtering" {

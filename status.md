@@ -1,11 +1,11 @@
-# unslop — status
+# deslop — status
 
 ## Current state
 
 - Zig 0.17.0-dev.2264+230c63650, builds clean: `zig build`; tests green.
 - One-shot HTTP client (no agent lifecycle): `src/systemone.zig:postJson` POSTs a
   `SystemOneRequest` to $SYSTEMONE_URL (default `http://localhost:8080/v1/systemone`);
-  optional `$TYPESAFE_API_KEY` -> `Authorization: Bearer`; `$UNSLOP_MODEL` for the model field.
+  optional `$TYPESAFE_API_KEY` -> `Authorization: Bearer`; `$DESLOP_MODEL` for the model field.
 - lsp_kit pinned in `build.zig.zon` (commit d148676, same as zls) — **not yet wired in build.zig**.
 
 ## Contract (from draft.md)
@@ -62,6 +62,7 @@
     (same keys as questions; `Answer` type matches question), `usage{input_tokens,output_tokens}`.
   - Errors: 422 `HTTPValidationError`.
 - Auth token via env (`$TYPESAFE_API_KEY`), per-line questions map to noul/choice.
-- Package name is `unslop` everywhere (build.zig, build.zig.zon name+fingerprint `0x4608cf9f88405b9e`,
+- Package name is `deslop` everywhere (build.zig, build.zig.zon name+fingerprint `0xf9522fb024337dde`,
   imports, help text).
 - Instructions template wraps the source line in backticks instead of escaped quotes.
+- Question batching: >32 lines => ceil(n/32) sequential POSTs (systemone.max_questions = 32; proxy caps 64/request). state carries the full source in every batch; line_N keys stay absolute so answers merge by line. -X dumps the first batch; -n bypasses batching.

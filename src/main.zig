@@ -1,33 +1,33 @@
 const std = @import("std");
 const Io = std.Io;
 
-const unslop = @import("unslop");
-const systemone = unslop.systemone;
+const deslop = @import("deslop");
+const systemone = deslop.systemone;
 
 pub fn main(init: std.process.Init) !void {
     const arena: std.mem.Allocator = init.arena.allocator();
     const args = try init.minimal.args.toSlice(arena);
 
-    const cfg = unslop.parseArgs(if (args.len > 0) args[1..] else args) catch |err| {
-        std.debug.print("unslop: {s} — run `unslop -h` for usage\n", .{@errorName(err)});
+    const cfg = deslop.parseArgs(if (args.len > 0) args[1..] else args) catch |err| {
+        std.debug.print("deslop: {s} — run `deslop -h` for usage\n", .{@errorName(err)});
         return err;
     };
 
     if (cfg.help) {
         var help_buffer: [4096]u8 = undefined;
         var stdout_file_writer: Io.File.Writer = .init(.stdout(), init.io, &help_buffer);
-        try stdout_file_writer.interface.writeAll(unslop.help_text);
+        try stdout_file_writer.interface.writeAll(deslop.help_text);
         try stdout_file_writer.interface.flush();
         return;
     }
 
     if (cfg.recursive != null) {
-        std.debug.print("unslop: -r is not implemented yet\n", .{});
+        std.debug.print("deslop: -r is not implemented yet\n", .{});
         return error.NotImplemented;
     }
 
     if (cfg.lsp) {
-        std.debug.print("unslop: -l is on hold (see status.md)\n", .{});
+        std.debug.print("deslop: -l is on hold (see status.md)\n", .{});
         return error.NotImplemented;
     }
 
@@ -63,33 +63,42 @@ pub fn main(init: std.process.Init) !void {
     var ladder: ?[]const []const u8 = null;
     var tag_width: usize = 0;
     if (cfg.tagfile) |path| {
-        const tags = try unslop.loadTags(arena, io, path);
+        const tags = try deslop.loadTags(arena, io, path);
         for (tags) |t| tag_width = @max(tag_width, t.len);
         ladder = tags;
     }
 
-    const request = try systemone.buildRequest(arena, model, source, ladder, cfg.line);
+    // Question batches: `state` carries the full source on every request;
+    // questions are chunked at max_questions (-n bypasses batching). -X dumps
+    // the first batch's request and exits.
+    const batch_size: usize = if (cfg.line != null) lines.len else systemone.max_questions;
+    var answers_list: std.ArrayList(systemone.Answer) = .empty;
+    var offset: usize = 0;
+    while (offset < lines.len) : (offset += batch_size) {
+        const limit = @min(batch_size, lines.len - offset);
+        const request = try systemone.buildRequest(arena, model, source, ladder, cfg.line, offset, limit);
 
-    if (cfg.dump_request) {
-        try out.writeAll(request);
-        try out.writeAll("\n");
-        try out.flush();
-        return;
+        if (cfg.dump_request) {
+            try out.writeAll(request);
+            try out.writeAll("\n");
+            try out.flush();
+            return;
+        }
+
+        const raw = systemone.postJson(arena, io, endpoint, bearer, request) catch |err| {
+            std.debug.print("deslop: {s} POSTing {s}\n", .{ @errorName(err), endpoint });
+            return err;
+        };
+        try answers_list.appendSlice(arena, try systemone.parseAnswers(arena, raw));
     }
-
-    const raw = systemone.postJson(arena, io, endpoint, bearer, request) catch |err| {
-        std.debug.print("unslop: {s} POSTing {s}\n", .{ @errorName(err), endpoint });
-        return err;
-    };
-
-    const answers = try systemone.parseAnswers(arena, raw);
+    const answers = answers_list.items;
 
     const scores = try arena.alloc(f64, lines.len);
     @memset(scores, 0.0);
     var assigned: []const []const u8 = &.{};
     if (ladder) |tags| {
         const assigned_mut = try arena.alloc([]const u8, lines.len);
-        const neutral = tags[unslop.fitnessToTagIndex(0.0, tags.len)];
+        const neutral = tags[deslop.fitnessToTagIndex(0.0, tags.len)];
         @memset(assigned_mut, neutral);
         for (answers) |a| {
             if (a.line < 1 or a.line > lines.len) continue;
@@ -102,7 +111,7 @@ pub fn main(init: std.process.Init) !void {
                     }
                 }
             } else if (a.noul) |p| {
-                assigned_mut[i] = tags[unslop.fitnessToTagIndex(2.0 * p - 1.0, tags.len)];
+                assigned_mut[i] = tags[deslop.fitnessToTagIndex(2.0 * p - 1.0, tags.len)];
             }
         }
         assigned = assigned_mut;
@@ -114,11 +123,11 @@ pub fn main(init: std.process.Init) !void {
     }
 
     if (cfg.json) {
-        try unslop.renderJson(out, lines, scores, assigned, ladder != null, cfg.line);
+        try deslop.renderJson(out, lines, scores, assigned, ladder != null, cfg.line);
     } else if (ladder != null) {
-        try unslop.renderTags(out, lines, assigned, tag_width, cfg.line);
+        try deslop.renderTags(out, lines, assigned, tag_width, cfg.line);
     } else {
-        try unslop.renderFitness(out, lines, scores, cfg.line);
+        try deslop.renderFitness(out, lines, scores, cfg.line);
     }
     try out.flush();
 }

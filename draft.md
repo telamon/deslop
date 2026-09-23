@@ -1,4 +1,4 @@
-# unslop
+# deslop
 
 A fast single line of code evaluator
 
@@ -7,7 +7,7 @@ A fast single line of code evaluator
 Fitness:
 
 ```bash
-$ unslop hello.c
+$ deslop hello.c
 1 | 1.00 | #include <stdio.h>
 2 | 0.00 |
 3 | 0.89 | int main(void)
@@ -20,7 +20,7 @@ $ unslop hello.c
 Categories:
 
 ```
-$ unslop -t tags.txt hello.c
+$ deslop -t tags.txt hello.c
 1 | awesomesauce | #include <stdio.h>
 2 | mediocre     |
 3 | typesafe     | int main(void)
@@ -44,9 +44,9 @@ each line has it's own background color, and a tag next to the left line-number 
 ## Manual
 
 ```bash
-unslop -h
+deslop -h
 
-  usage: unslop [options] [FILE]
+  usage: deslop [options] [FILE]
   when no FILE is provided, context is read from STDIN
 
   Default mode:
@@ -64,7 +64,7 @@ unslop -h
   -l                    Start LSP server mode (-n and FILE ignored)
   -X                    dumps Json request to stdout and exits
 
-  Unslop is compatible with `/v1/systemone` spec
+  Deslop is compatible with `/v1/systemone` spec
 
   SYSTEMONE_URL=http://localhost:8080/v1/systemone
 ```
