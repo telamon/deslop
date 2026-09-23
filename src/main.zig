@@ -1,14 +1,14 @@
 const std = @import("std");
 const Io = std.Io;
 
-const code_xorcery = @import("unslop");
-const systemone = code_xorcery.systemone;
+const unslop = @import("unslop");
+const systemone = unslop.systemone;
 
 pub fn main(init: std.process.Init) !void {
     const arena: std.mem.Allocator = init.arena.allocator();
     const args = try init.minimal.args.toSlice(arena);
 
-    const cfg = code_xorcery.parseArgs(if (args.len > 0) args[1..] else args) catch |err| {
+    const cfg = unslop.parseArgs(if (args.len > 0) args[1..] else args) catch |err| {
         std.debug.print("unslop: {s} — run `unslop -h` for usage\n", .{@errorName(err)});
         return err;
     };
@@ -16,7 +16,7 @@ pub fn main(init: std.process.Init) !void {
     if (cfg.help) {
         var help_buffer: [4096]u8 = undefined;
         var stdout_file_writer: Io.File.Writer = .init(.stdout(), init.io, &help_buffer);
-        try stdout_file_writer.interface.writeAll(code_xorcery.help_text);
+        try stdout_file_writer.interface.writeAll(unslop.help_text);
         try stdout_file_writer.interface.flush();
         return;
     }
@@ -32,7 +32,8 @@ pub fn main(init: std.process.Init) !void {
     }
 
     const io = init.io;
-    const harness_bin = code_xorcery.harnessBin(init.environ_map);
+    const endpoint = systemone.endpointFromEnv(init.environ_map);
+    const bearer = systemone.bearerFromEnv(init.environ_map);
     const model = systemone.modelFromEnv(init.environ_map);
 
     var stdout_buffer: [8192]u8 = undefined;
@@ -62,19 +63,23 @@ pub fn main(init: std.process.Init) !void {
     var ladder: ?[]const []const u8 = null;
     var tag_width: usize = 0;
     if (cfg.tagfile) |path| {
-        const tags = try code_xorcery.loadTags(arena, io, path);
+        const tags = try unslop.loadTags(arena, io, path);
         for (tags) |t| tag_width = @max(tag_width, t.len);
         ladder = tags;
     }
 
     const request = try systemone.buildRequest(arena, model, source, ladder, cfg.line);
 
-    const raw = code_xorcery.runHarness(arena, io, &.{ harness_bin, "-R", "-T", "-r" }, request) catch |err| switch (err) {
-        error.FileNotFound => {
-            std.debug.print("unslop: harness not found: {s} (set HARNESS_BIN)\n", .{harness_bin});
-            return err;
-        },
-        else => return err,
+    if (cfg.dump_request) {
+        try out.writeAll(request);
+        try out.writeAll("\n");
+        try out.flush();
+        return;
+    }
+
+    const raw = systemone.postJson(arena, io, endpoint, bearer, request) catch |err| {
+        std.debug.print("unslop: {s} POSTing {s}\n", .{ @errorName(err), endpoint });
+        return err;
     };
 
     const answers = try systemone.parseAnswers(arena, raw);
@@ -84,7 +89,7 @@ pub fn main(init: std.process.Init) !void {
     var assigned: []const []const u8 = &.{};
     if (ladder) |tags| {
         const assigned_mut = try arena.alloc([]const u8, lines.len);
-        const neutral = tags[code_xorcery.fitnessToTagIndex(0.0, tags.len)];
+        const neutral = tags[unslop.fitnessToTagIndex(0.0, tags.len)];
         @memset(assigned_mut, neutral);
         for (answers) |a| {
             if (a.line < 1 or a.line > lines.len) continue;
@@ -97,7 +102,7 @@ pub fn main(init: std.process.Init) !void {
                     }
                 }
             } else if (a.noul) |p| {
-                assigned_mut[i] = tags[code_xorcery.fitnessToTagIndex(2.0 * p - 1.0, tags.len)];
+                assigned_mut[i] = tags[unslop.fitnessToTagIndex(2.0 * p - 1.0, tags.len)];
             }
         }
         assigned = assigned_mut;
@@ -109,11 +114,11 @@ pub fn main(init: std.process.Init) !void {
     }
 
     if (cfg.json) {
-        try code_xorcery.renderJson(out, lines, scores, assigned, ladder != null, cfg.line);
+        try unslop.renderJson(out, lines, scores, assigned, ladder != null, cfg.line);
     } else if (ladder != null) {
-        try code_xorcery.renderTags(out, lines, assigned, tag_width, cfg.line);
+        try unslop.renderTags(out, lines, assigned, tag_width, cfg.line);
     } else {
-        try code_xorcery.renderFitness(out, lines, scores, cfg.line);
+        try unslop.renderFitness(out, lines, scores, cfg.line);
     }
     try out.flush();
 }

@@ -1,8 +1,7 @@
 //! Codec for the TypeSafe /v1/systemone API (see schema/openapi.json).
 //!
-//! In this initial variant the request JSON is piped raw to the harness
-//! (`harness -R -T -r`) and the model's raw output is expected to be a
-//! `SystemOneResponse`.
+//! unslop is one-shot: it POSTs a `SystemOneRequest` to $SYSTEMONE_URL and
+//! parses the `SystemOneResponse` back out; no agent lifecycle involved.
 
 const std = @import("std");
 const Io = std.Io;
@@ -17,31 +16,6 @@ pub fn modelFromEnv(env: *std.process.Environ.Map) []const u8 {
         if (m.len > 0) return m;
     }
     return default_model;
-}
-
-/// Write `s` as a complete JSON string literal (with quotes), escaping per
-/// RFC 8259. Bytes >= 0x20 pass through unchanged (UTF-8 safe).
-pub fn writeJsonString(out: *Io.Writer, s: []const u8) Io.Writer.Error!void {
-    try out.writeByte('"');
-    for (s) |c| {
-        switch (c) {
-            '"' => try out.writeAll("\\\""),
-            '\\' => try out.writeAll("\\\\"),
-            0x08 => try out.writeAll("\\b"),
-            0x0c => try out.writeAll("\\f"),
-            '\n' => try out.writeAll("\\n"),
-            '\r' => try out.writeAll("\\r"),
-            '\t' => try out.writeAll("\\t"),
-            else => {
-                if (c < 0x20) {
-                    try out.print("\\u{x:0>4}", .{c});
-                } else {
-                    try out.writeByte(c);
-                }
-            },
-        }
-    }
-    try out.writeByte('"');
 }
 
 /// Source with exactly one trailing '\n' removed (same rule as the renderer).
@@ -72,65 +46,56 @@ const good_question =
 const categorical_question =
     "Which of the listed categories best describes this line?";
 
-/// Build a `SystemOneRequest`: `state` = the whole source, one question per
-/// line named `line_N`. Default mode asks a noul good-vs-bad question per
-/// line; with `ladder`, a choice question restricted to the ladder tags.
-/// `only` (from -n) restricts the request to a single line.
+/// Build a `SystemOneRequest` as a `std.json.Value` tree and serialize it with
+/// `std.json.Stringify` (the library owns all JSON syntax and escaping).
+/// `state` = the whole source, one question per line named `line_N`. Default
+/// mode asks a noul good-vs-bad question per line; with `ladder`, a choice
+/// question restricted to the ladder tags. `only` (from -n) restricts the
+/// request to a single line.
 pub fn buildRequest(
     arena: Allocator,
     model: []const u8,
     source: []const u8,
     ladder: ?[]const []const u8,
     only: ?u32,
-) (Allocator.Error || Io.Writer.Error)![]u8 {
-    var aw: Io.Writer.Allocating = .init(arena);
-    defer aw.deinit();
-    const w = &aw.writer;
-
-    try w.writeAll("{\"model\":");
-    try writeJsonString(w, model);
-    try w.writeAll(",\"state\":");
-    try writeJsonString(w, source);
-    try w.writeAll(",\"questions\":{");
-
+) Allocator.Error![]u8 {
+    var questions: std.json.ObjectMap = .empty;
     const n = countLines(source);
-    var first = true;
     var i: usize = 1;
     while (i <= n) : (i += 1) {
         if (only) |o| {
             if (o != i) continue;
         }
-        if (!first) try w.writeAll(",");
-        first = false;
         const line = lineAt(source, i);
+        var q: std.json.ObjectMap = .empty;
         if (ladder) |tags| {
-            try w.print("\"line_{d}\":{{\"type\":\"choice\",\"instructions\":", .{i});
             const instr = try std.fmt.allocPrint(
                 arena,
-                "Line {d} of the source: \"{s}\". " ++ categorical_question,
+                "Line {d} of the source: `{s}`. " ++ categorical_question,
                 .{ i, line },
             );
-            try writeJsonString(w, instr);
-            try w.writeAll(",\"criteria\":{");
-            for (tags, 0..) |tag, ti| {
-                if (ti != 0) try w.writeAll(",");
-                try writeJsonString(w, tag);
-                try w.writeAll(":null");
-            }
-            try w.writeAll("}}");
+            try q.put(arena, "type", .{ .string = "choice" });
+            try q.put(arena, "instructions", .{ .string = instr });
+            var criteria: std.json.ObjectMap = .empty;
+            for (tags) |tag| try criteria.put(arena, tag, .null);
+            try q.put(arena, "criteria", .{ .object = criteria });
         } else {
-            try w.print("\"line_{d}\":{{\"type\":\"noul\",\"instructions\":", .{i});
             const instr = try std.fmt.allocPrint(
                 arena,
-                "Line {d} of the source: \"{s}\". " ++ good_question,
+                "Line {d} of the source: `{s}`. " ++ good_question,
                 .{ i, line },
             );
-            try writeJsonString(w, instr);
-            try w.writeAll("}");
+            try q.put(arena, "type", .{ .string = "noul" });
+            try q.put(arena, "instructions", .{ .string = instr });
         }
+        const name = try std.fmt.allocPrint(arena, "line_{d}", .{i});
+        try questions.put(arena, name, .{ .object = q });
     }
-    try w.writeAll("}}");
-    return aw.toOwnedSlice();
+    var root: std.json.ObjectMap = .empty;
+    try root.put(arena, "model", .{ .string = model });
+    try root.put(arena, "state", .{ .string = source });
+    try root.put(arena, "questions", .{ .object = questions });
+    return std.json.Stringify.valueAlloc(arena, std.json.Value{ .object = root }, .{});
 }
 
 pub const ParseError = error{BadResponse};
@@ -182,11 +147,53 @@ pub fn parseAnswers(arena: Allocator, bytes: []const u8) (Allocator.Error || Par
     return list.items;
 }
 
-test "writeJsonString escapes control characters" {
-    var buf: [64]u8 = undefined;
-    var w: Io.Writer = .fixed(&buf);
-    try writeJsonString(&w, "a\"b\\c\nd\x01");
-    try std.testing.expectEqualStrings("\"a\\\"b\\\\c\\nd\\u0001\"", w.buffered());
+pub const default_endpoint = "http://localhost:8080/v1/systemone";
+
+/// Resolve the /v1/systemone endpoint: $SYSTEMONE_URL or `default_endpoint`.
+pub fn endpointFromEnv(env: *std.process.Environ.Map) []const u8 {
+    if (env.get("SYSTEMONE_URL")) |u| {
+        if (u.len > 0) return u;
+    }
+    return default_endpoint;
+}
+
+/// Optional Bearer token: $TYPESAFE_API_KEY (null when unset/empty).
+pub fn bearerFromEnv(env: *std.process.Environ.Map) ?[]const u8 {
+    if (env.get("TYPESAFE_API_KEY")) |t| {
+        if (t.len > 0) return t;
+    }
+    return null;
+}
+
+/// One-shot HTTP POST: send `body` (a SystemOneRequest) to `endpoint` and
+/// return the response body. Requires HTTP 200; any other status is
+/// `error.UnexpectedStatus`.
+pub fn postJson(
+    arena: Allocator,
+    io: Io,
+    endpoint: []const u8,
+    bearer: ?[]const u8,
+    body: []const u8,
+) ![]u8 {
+    var client: std.http.Client = .{ .allocator = arena, .io = io };
+    defer client.deinit();
+
+    var aw: Io.Writer.Allocating = .init(arena);
+    defer aw.deinit();
+
+    const auth = if (bearer) |t| try std.fmt.allocPrint(arena, "Bearer {s}", .{t}) else null;
+    const result = try client.fetch(.{
+        .location = .{ .url = endpoint },
+        .method = .POST,
+        .payload = body,
+        .response_writer = &aw.writer,
+        .headers = .{
+            .content_type = .{ .override = "application/json" },
+            .authorization = if (auth) |a| .{ .override = a } else .default,
+        },
+    });
+    if (result.status != .ok) return error.UnexpectedStatus;
+    return aw.toOwnedSlice();
 }
 
 test "buildRequest default mode round-trips" {
@@ -202,7 +209,7 @@ test "buildRequest default mode round-trips" {
     try std.testing.expect(qs.get("line_3") == null);
     const q1 = qs.get("line_1").?.object;
     try std.testing.expectEqualStrings("noul", q1.get("type").?.string);
-    try std.testing.expect(std.mem.indexOf(u8, q1.get("instructions").?.string, "\"a\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, q1.get("instructions").?.string, "`a`") != null);
 }
 
 test "buildRequest categorical and only" {

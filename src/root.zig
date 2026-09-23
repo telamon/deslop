@@ -3,21 +3,6 @@ const std = @import("std");
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
 
-/// The harness binary to use when `HARNESS_BIN` is not explicitly set.
-/// A bare name is resolved through `PATH` at spawn time.
-pub const default_harness_bin: []const u8 = "harness";
-
-/// Resolve the path of the harness binary.
-///
-/// An explicitly set, non-empty `HARNESS_BIN` environment variable
-/// overrides the default; otherwise `default_harness_bin` is returned.
-pub fn harnessBin(env: *std.process.Environ.Map) []const u8 {
-    if (env.get("HARNESS_BIN")) |bin| {
-        if (bin.len > 0) return bin;
-    }
-    return default_harness_bin;
-}
-
 /// This is a documentation comment to explain the `printAnotherMessage` function below.
 ///
 /// Accepting an `Io.Writer` instance is a handy way to write reusable code.
@@ -51,6 +36,8 @@ pub const Config = struct {
     json: bool = false,
     /// `-l`: LSP server mode.
     lsp: bool = false,
+    /// `-X`: dump the SystemOneRequest JSON to stdout and exit.
+    dump_request: bool = false,
     /// `-h|--help`: print usage and exit.
     help: bool = false,
 };
@@ -78,13 +65,13 @@ pub const help_text =
     \\  -r PATH               Recursive grade path (not implemented yet)
     \\  --json|-j             Output structured json
     \\  -l                    Start LSP server mode (-n and FILE ignored)
+    \\  -X                    dumps Json request to stdout and exits
     \\
-    \\  unslop uses harness, refer to https://github.com/telamon/harness
-    \\  for inference backend configuration.
+    \\  unslop POSTs a /v1/systemone request to the endpoint in $SYSTEMONE_URL.
     \\
     \\  Environment options:
     \\
-    \\  HARNESS_BIN=/usr/bin/harness
+    \\  SYSTEMONE_URL=http://localhost:8080/v1/systemone
     \\
 ;
 
@@ -118,6 +105,8 @@ pub fn parseArgs(args: []const []const u8) ParseError!Config {
                 cfg.json = true;
             } else if (std.mem.eql(u8, arg, "-l")) {
                 cfg.lsp = true;
+            } else if (std.mem.eql(u8, arg, "-X")) {
+                cfg.dump_request = true;
             } else if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
                 cfg.help = true;
             } else {
@@ -181,12 +170,6 @@ test "parseArgs: errors" {
     try std.testing.expectError(ParseError.TooManyPositionals, parseArgs(&.{ "a.c", "b.c" }));
 }
 
-// ---------------------------------------------------------------------------
-// Harness bridge (raw I/O; request/response codecs live in src/systemone.zig)
-// ---------------------------------------------------------------------------
-
-/// Line verdict envelope: one JSON object per line of harness stdout.
-/// `fitness` and `tag` are both optional; extra fields are ignored.
 pub fn loadTags(arena: Allocator, io: Io, path: []const u8) ![][]const u8 {
     const file = try Io.Dir.cwd().openFile(io, path, .{ .mode = .read_only });
     var buf: [4096]u8 = undefined;
@@ -262,7 +245,6 @@ pub fn renderJson(
     }
 }
 
-
 test "fitnessToTagIndex" {
     try std.testing.expectEqual(@as(usize, 0), fitnessToTagIndex(1.0, 10));
     try std.testing.expectEqual(@as(usize, 4), fitnessToTagIndex(0.0, 10));
@@ -280,40 +262,7 @@ test "renderFitness format" {
 
 pub const systemone = @import("systemone.zig");
 
-/// Spawn the harness with `argv` (argv[0] must be the harness path), write
-/// `payload` to its stdin, and return its raw stdout. Stderr is inherited.
-/// Note: stdin is fully written before stdout is read; oversized
-/// bidirectional traffic (> pipe buffer, ~64K) can deadlock if the harness
-/// floods stdout before consuming stdin.
-pub fn runHarness(
-    arena: Allocator,
-    io: Io,
-    argv: []const []const u8,
-    payload: []const u8,
-) ![]u8 {
-    var child = try std.process.spawn(io, .{
-        .argv = argv,
-        .stdin = .pipe,
-        .stdout = .pipe,
-        .stderr = .inherit,
-    });
-
-    {
-        var wbuf: [4096]u8 = undefined;
-        var stdin_file_writer: Io.File.Writer = .init(child.stdin.?, io, &wbuf);
-        const w = &stdin_file_writer.interface;
-        try w.writeAll(payload);
-        if (payload.len == 0 or payload[payload.len - 1] != '\n') try w.writeAll("\n");
-        try w.flush();
-        child.stdin.?.close(io);
-        child.stdin = null;
-    }
-
-    var rbuf: [8192]u8 = undefined;
-    var stdout_file_reader: Io.File.Reader = .init(child.stdout.?, io, &rbuf);
-    const data = try stdout_file_reader.interface.allocRemaining(arena, .limited(16 << 20));
-
-    const term = try child.wait(io);
-    if (term != .exited or term.exited != 0) return error.HarnessCrashed;
-    return data;
+test "parseArgs: -X dumps request" {
+    const cfg = try parseArgs(&.{"-X"});
+    try std.testing.expect(cfg.dump_request);
 }

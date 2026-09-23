@@ -7,7 +7,7 @@ A fast single line of code evaluator
 Fitness:
 
 ```bash
-$ unslop source.c
+$ unslop hello.c
 1 | 1.00 | #include <stdio.h>
 2 | 0.00 |
 3 | 0.89 | int main(void)
@@ -20,7 +20,7 @@ $ unslop source.c
 Categories:
 
 ```
-$ unslop -t tags.txt source.c
+$ unslop -t tags.txt hello.c
 1 | awesomesauce | #include <stdio.h>
 2 | mediocre     |
 3 | typesafe     | int main(void)
@@ -59,23 +59,22 @@ unslop -h
   -n NUMBER             Single line run
   -t TAGFILE            Read whitespace delimited tags from TAGFILE
   -r PATH               Recursive grade path (STDIN & FILE is ignored)
+  -s                    Show only a summarize -r output
   --json|-j             Output structured json
   -l                    Start LSP server mode (-n and FILE ignored)
+  -X                    dumps Json request to stdout and exits
 
-  Unslop uses harness, refer to https://github.com/telamon/harness
-  for inference backend configuration.
+  Unslop is compatible with `/v1/systemone` spec
 
-  Environment options:
-
-  HARNESS_BIN=/usr/bin/harness
+  SYSTEMONE_URL=http://localhost:8080/v1/systemone
 ```
 
 
-Note: `-r` will not be implemented yet.
+Note: `-r` and `-l` will not be implemented yet.
 
 ## Modes
 
-### Noul
+### Quality
 
 Each LOC get's a simple good or bad grading in range of -1 to 1.
 
