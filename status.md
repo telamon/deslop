@@ -19,7 +19,7 @@
 
 ## TODO
 
-1. [ ] CLI parsing: `-n NUMBER`, `-t TAGFILE`, `--json|-j`, `-l`, `[FILE]` / STDIN fallback
+1. [x] CLI parsing: `-n NUMBER`, `-t TAGFILE`, `--json|-j`, `-l`, `[FILE]` / STDIN fallback
 2. [ ] Harness bridge: spawn `HARNESS_BIN` (stdio pipes), stream source lines as context,
        collect per-line verdict; define line-delimited JSON envelope for fitness score
 3. [ ] Example 1 — Fitness output: `N | X.XX | <line>` with 2-decimal formatting
@@ -27,7 +27,7 @@
 5. [ ] `--json` structured output (mirror of text: `{line, score|tag}`)
 6. [ ] Tests: arg parser unit tests; end-to-end fixture with a fake `HARNESS_BIN`
        script that emits canned verdicts (no model needed in CI)
-7. [ ] Housekeeping: promote draft.md → README.md; license headers; `-r` help text marked "not implemented"
+7. [ ] Housekeeping: promote draft.md → README.md; license headers; -r help text marked "not implemented"
 
 ## On hold
 
