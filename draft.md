@@ -58,13 +58,20 @@ xorcery -h
 
   -n NUMBER             Single line run
   -t TAGFILE            Read whitespace delimited tags from TAGFILE
+  -r PATH               Recursive grade path (STDIN & FILE is ignored)
   --json|-j             Output structured json
   -l                    Start LSP server mode (-n and FILE ignored)
 
-  Code-Xorcery uses libharness, refer to https://github.com/telamon/harness
+  Code-Xorcery uses harness, refer to https://github.com/telamon/harness
   for inference backend configuration.
+
+  Environment options:
+
+  HARNESS_BIN=/usr/bin/harness
 ```
 
+
+Note: `-r` will not be implemented yet.
 
 ## Modes
 
