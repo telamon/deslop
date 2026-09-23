@@ -1,4 +1,4 @@
-# code-xorcery
+# unslop
 
 A fast single line of code evaluator
 
@@ -7,7 +7,7 @@ A fast single line of code evaluator
 Fitness:
 
 ```bash
-$ xorcery source.c
+$ unslop source.c
 1 | 1.00 | #include <stdio.h>
 2 | 0.00 |
 3 | 0.89 | int main(void)
@@ -20,7 +20,7 @@ $ xorcery source.c
 Categories:
 
 ```
-$ xorcery -t tags.txt source.c
+$ unslop -t tags.txt source.c
 1 | awesomesauce | #include <stdio.h>
 2 | mediocre     |
 3 | typesafe     | int main(void)
@@ -44,9 +44,9 @@ each line has it's own background color, and a tag next to the left line-number 
 ## Manual
 
 ```bash
-xorcery -h
+unslop -h
 
-  usage: xorcery [options] [FILE]
+  usage: unslop [options] [FILE]
   when no FILE is provided, context is read from STDIN
 
   Default mode:
@@ -62,7 +62,7 @@ xorcery -h
   --json|-j             Output structured json
   -l                    Start LSP server mode (-n and FILE ignored)
 
-  Code-Xorcery uses harness, refer to https://github.com/telamon/harness
+  Unslop uses harness, refer to https://github.com/telamon/harness
   for inference backend configuration.
 
   Environment options:

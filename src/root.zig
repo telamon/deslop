@@ -1,6 +1,7 @@
 //! By convention, root.zig is the root source file when making a package.
 const std = @import("std");
 const Io = std.Io;
+const Allocator = std.mem.Allocator;
 
 /// The harness binary to use when `HARNESS_BIN` is not explicitly set.
 /// A bare name is resolved through `PATH` at spawn time.
@@ -62,7 +63,7 @@ pub const ParseError = error{
 };
 
 pub const help_text =
-    \\usage: xorcery [options] [FILE]
+    \\usage: unslop [options] [FILE]
     \\  when no FILE is provided, context is read from STDIN
     \\
     \\  Default mode:
@@ -78,7 +79,7 @@ pub const help_text =
     \\  --json|-j             Output structured json
     \\  -l                    Start LSP server mode (-n and FILE ignored)
     \\
-    \\  Code-Xorcery uses harness, refer to https://github.com/telamon/harness
+    \\  unslop uses harness, refer to https://github.com/telamon/harness
     \\  for inference backend configuration.
     \\
     \\  Environment options:
@@ -178,4 +179,141 @@ test "parseArgs: errors" {
     try std.testing.expectError(ParseError.InvalidNumber, parseArgs(&.{ "-n", "abc" }));
     try std.testing.expectError(ParseError.InvalidNumber, parseArgs(&.{ "-n", "0" }));
     try std.testing.expectError(ParseError.TooManyPositionals, parseArgs(&.{ "a.c", "b.c" }));
+}
+
+// ---------------------------------------------------------------------------
+// Harness bridge (raw I/O; request/response codecs live in src/systemone.zig)
+// ---------------------------------------------------------------------------
+
+/// Line verdict envelope: one JSON object per line of harness stdout.
+/// `fitness` and `tag` are both optional; extra fields are ignored.
+pub fn loadTags(arena: Allocator, io: Io, path: []const u8) ![][]const u8 {
+    const file = try Io.Dir.cwd().openFile(io, path, .{ .mode = .read_only });
+    var buf: [4096]u8 = undefined;
+    var file_reader: Io.File.Reader = .init(file, io, &buf);
+    const data = try file_reader.interface.allocRemaining(arena, .limited(1 << 20));
+    var tags: std.ArrayList([]const u8) = .empty;
+    var it = std.mem.tokenizeAny(u8, data, " \t\r\n");
+    while (it.next()) |t| try tags.append(arena, t);
+    if (tags.items.len == 0) return error.EmptyTagFile;
+    return tags.items;
+}
+
+/// Map a fitness in [-1.0, 1.0] onto the tag ladder (index 0 = best).
+pub fn fitnessToTagIndex(fitness: f64, ladder_len: usize) usize {
+    if (ladder_len <= 1) return 0;
+    const span: f64 = @floatFromInt(ladder_len - 1);
+    const raw: f64 = (1.0 - fitness) / 2.0 * span;
+    return @intFromFloat(@max(0.0, @min(span, raw)));
+}
+
+/// Render default mode: `N | X.XX | <line>`.
+pub fn renderFitness(
+    out: *Io.Writer,
+    lines: []const []const u8,
+    scores: []const f64,
+    only: ?u32,
+) Io.Writer.Error!void {
+    for (lines, scores, 1..) |text, score, n| {
+        if (only) |l| {
+            if (n != @as(usize, l)) continue;
+        }
+        try out.print("{d} | {d:.2} | {s}\n", .{ n, score, text });
+    }
+}
+
+/// Render categorical mode: `N | tag | <line>`, tag column padded to `width`.
+pub fn renderTags(
+    out: *Io.Writer,
+    lines: []const []const u8,
+    assigned: []const []const u8,
+    width: usize,
+    only: ?u32,
+) Io.Writer.Error!void {
+    for (lines, assigned, 1..) |text, tag, n| {
+        if (only) |l| {
+            if (n != @as(usize, l)) continue;
+        }
+        try out.print("{d} | {s}", .{ n, tag });
+        var pad: usize = width - tag.len;
+        while (pad > 0) : (pad -= 1) try out.writeAll(" ");
+        try out.print(" | {s}\n", .{text});
+    }
+}
+
+/// Render structured JSON: one object per line.
+pub fn renderJson(
+    out: *Io.Writer,
+    lines: []const []const u8,
+    scores: []const f64,
+    assigned: []const []const u8,
+    categorical: bool,
+    only: ?u32,
+) Io.Writer.Error!void {
+    for (lines, 1..) |_, n| {
+        if (only) |l| {
+            if (n != @as(usize, l)) continue;
+        }
+        if (categorical) {
+            try out.print("{{\"line\":{d},\"tag\":\"{s}\"}}\n", .{ n, assigned[n - 1] });
+        } else {
+            try out.print("{{\"line\":{d},\"fitness\":{d:.2}}}\n", .{ n, scores[n - 1] });
+        }
+    }
+}
+
+
+test "fitnessToTagIndex" {
+    try std.testing.expectEqual(@as(usize, 0), fitnessToTagIndex(1.0, 10));
+    try std.testing.expectEqual(@as(usize, 4), fitnessToTagIndex(0.0, 10));
+    try std.testing.expectEqual(@as(usize, 9), fitnessToTagIndex(-1.0, 10));
+    try std.testing.expectEqual(@as(usize, 0), fitnessToTagIndex(0.89, 10));
+    try std.testing.expectEqual(@as(usize, 3), fitnessToTagIndex(0.12, 10));
+}
+
+test "renderFitness format" {
+    var buf: [256]u8 = undefined;
+    var w: Io.Writer = .fixed(&buf);
+    try renderFitness(&w, &.{ "x", "" }, &.{ 1.0, -0.5 }, null);
+    try std.testing.expectEqualStrings("1 | 1.00 | x\n2 | -0.50 | \n", w.buffered());
+}
+
+pub const systemone = @import("systemone.zig");
+
+/// Spawn the harness with `argv` (argv[0] must be the harness path), write
+/// `payload` to its stdin, and return its raw stdout. Stderr is inherited.
+/// Note: stdin is fully written before stdout is read; oversized
+/// bidirectional traffic (> pipe buffer, ~64K) can deadlock if the harness
+/// floods stdout before consuming stdin.
+pub fn runHarness(
+    arena: Allocator,
+    io: Io,
+    argv: []const []const u8,
+    payload: []const u8,
+) ![]u8 {
+    var child = try std.process.spawn(io, .{
+        .argv = argv,
+        .stdin = .pipe,
+        .stdout = .pipe,
+        .stderr = .inherit,
+    });
+
+    {
+        var wbuf: [4096]u8 = undefined;
+        var stdin_file_writer: Io.File.Writer = .init(child.stdin.?, io, &wbuf);
+        const w = &stdin_file_writer.interface;
+        try w.writeAll(payload);
+        if (payload.len == 0 or payload[payload.len - 1] != '\n') try w.writeAll("\n");
+        try w.flush();
+        child.stdin.?.close(io);
+        child.stdin = null;
+    }
+
+    var rbuf: [8192]u8 = undefined;
+    var stdout_file_reader: Io.File.Reader = .init(child.stdout.?, io, &rbuf);
+    const data = try stdout_file_reader.interface.allocRemaining(arena, .limited(16 << 20));
+
+    const term = try child.wait(io);
+    if (term != .exited or term.exited != 0) return error.HarnessCrashed;
+    return data;
 }
