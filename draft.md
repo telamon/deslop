@@ -20,7 +20,7 @@ $ deslop hello.c
 
 Categories:
 
-```
+```bash
 $ deslop -t tags.txt hello.c
 1 | awesomesauce | #include <stdio.h>
 2 | mediocre     |
@@ -33,7 +33,7 @@ $ deslop -t tags.txt hello.c
 
 Summary `-s`:
 
-```
+```bash
 $ deslop -t tags.txt -s hello.c
 LOC: 8
 Score: 0.85 ( 5 / 3 )
