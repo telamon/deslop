@@ -36,11 +36,9 @@ Summary `-s`:
 ```
 $ deslop -t tags.txt -s hello.c
 LOC: 8
-Good: 6.3 sum, max: 1.0
-Bad: 3.0 sum, max: -0.46
-Average score: 0.85
+Score: 0.85 ( 5 / 3 )
 
-TAG          COUNT  AVG CONF
+Tag          Count  Confidence
 mediocre         3     0.51
 typesafe         3     0.10
 ...
@@ -55,8 +53,8 @@ questioned for the tags, and then one more time questioned for the good/bad scor
 Besides the obvious use-case to grade generated code;
 The LSP interface can provide visual feedback in real time
 
-[Demo Video#1](./demo/xorcery-nvim.webm)
-[Demo Video#2](./demo/xorcery-vscodium.webm)
+![Demo Video#1](./demo/xorcery-nvim.webm)
+![Demo Video#2](./demo/xorcery-vscodium.webm)
 
 (The demos shows a screen capture of editors; code being edited in real time,
 each line has it's own background color, and a tag next to the left line-number gutter)
@@ -96,7 +94,7 @@ Note: `-r` and `-l` will not be implemented yet.
 
 ## Modes
 
-### Quality
+### Flair
 
 Each LOC get's a simple good or bad grading in range of -1 to 1.
 
