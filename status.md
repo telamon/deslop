@@ -66,3 +66,6 @@
   imports, help text).
 - Instructions template wraps the source line in backticks instead of escaped quotes.
 - Question batching: >32 lines => ceil(n/32) sequential POSTs (systemone.max_questions = 32; proxy caps 64/request). state carries the full source in every batch; line_N keys stay absolute so answers merge by line. -X dumps the first batch; -n bypasses batching.
+- Partial render: each batch maps its answers and prints its rows immediately (flush per batch); renderers take a first parameter (1-based number of the slice first row) so numbering stays absolute; -j is NDJSON so it streams too.
+- Summary -s: LOC, Good/Bad sums with extremes, average fitness; with -t two passes (choice tags then noul fitness) per draft.md; tag table sorted count desc (ties in ladder order), AVG CONF from ChoiceAnswer.confidence (now parsed); unanswered reported separately; -s suppresses per-line output (text mode only, -j ignores it).
+- New -T TAGFILE: like -t but rows render as | NNN | tag | score | line (3-digit zero-padded number, tag padded, score right-aligned). Two passes (choice tags then noul scores); rows render on pass 1 per batch. -t and -T are mutually exclusive (ConflictingOptions); -T -s gives summary; -T -j keeps categorical NDJSON (tag only).

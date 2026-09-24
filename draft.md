@@ -1,6 +1,6 @@
 # deslop
 
-A fast single line of code evaluator
+A fast "system-one" single line of code evaluator
 
 ## Use
 
@@ -8,13 +8,14 @@ Fitness:
 
 ```bash
 $ deslop hello.c
-1 | 1.00 | #include <stdio.h>
-2 | 0.00 |
-3 | 0.89 | int main(void)
-4 | 0.12 | {
-5 | 1.00 |     printf("hello, world\n");
-6 | 1.00 |     return 0;
-7 | 1.00 | }
+1 | 0.96 | #include <stdio.h>
+2 | 0.49 |
+3 | 0.95 | int main(void)
+4 | 0.88 | {
+5 | 0.89 |     printf("hello, world\n");
+6 | 0.57 |
+7 | 0.96 |     return 0;
+8 | 0.92 | }
 ```
 
 Categories:
@@ -30,6 +31,25 @@ $ deslop -t tags.txt hello.c
 7 | typesafe     | }
 ```
 
+Summary `-s`:
+
+```
+$ deslop -t tags.txt -s hello.c
+LOC: 8
+Good: 6.3 sum, max: 1.0
+Bad: 3.0 sum, max: -0.46
+Average score: 0.85
+
+TAG          COUNT  AVG CONF
+mediocre         3     0.51
+typesafe         3     0.10
+...
+```
+
+When `-s` is used in conjunction with `-t` then the source input is first
+questioned for the tags, and then one more time questioned for the good/bad score.
+
+
 ## Real Time Editor Feedback
 
 Besides the obvious use-case to grade generated code;
@@ -42,6 +62,8 @@ The LSP interface can provide visual feedback in real time
 each line has it's own background color, and a tag next to the left line-number gutter)
 
 ## Manual
+
+`TODO: rework`
 
 ```bash
 deslop -h
@@ -59,7 +81,7 @@ deslop -h
   -n NUMBER             Single line run
   -t TAGFILE            Read whitespace delimited tags from TAGFILE
   -r PATH               Recursive grade path (STDIN & FILE is ignored)
-  -s                    Show only a summarize -r output
+  -s                    Output a summary
   --json|-j             Output structured json
   -l                    Start LSP server mode (-n and FILE ignored)
   -X                    dumps Json request to stdout and exits

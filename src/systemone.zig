@@ -115,6 +115,8 @@ pub const Answer = struct {
     line: u32,
     noul: ?f64 = null,
     choice: ?[]const u8 = null,
+    /// `ChoiceAnswer.confidence` (1 - normalized entropy); noul answers have none.
+    confidence: ?f64 = null,
 };
 
 fn parseLineKey(key: []const u8) ?u32 {
@@ -148,6 +150,7 @@ pub fn parseAnswers(arena: Allocator, bytes: []const u8) (Allocator.Error || Par
         if (val != .object) continue;
         var answer = Answer{ .line = line };
         if (val.object.get("noul")) |nv| answer.noul = asNumber(nv);
+        if (val.object.get("confidence")) |cf| answer.confidence = asNumber(cf);
         if (val.object.get("choice")) |cv| {
             if (cv == .string) answer.choice = cv.string;
         }
@@ -260,7 +263,7 @@ test "parseAnswers noul choice and filtering" {
     const bytes =
         \\{"model":"x","answers":{
         \\"line_1":{"type":"noul","noul":0.5},
-        \\"line_2":{"type":"choice","choice":"mediocre"},
+        \\"line_2":{"type":"choice","choice":"mediocre","confidence":0.42},
         \\"ignored":{"type":"noul","noul":1},
         \\"line_3":{"type":"noul"}},
         \\"usage":{"input_tokens":1,"output_tokens":2}}
@@ -268,6 +271,7 @@ test "parseAnswers noul choice and filtering" {
     const answers = try parseAnswers(arena, bytes);
     try std.testing.expectEqual(@as(usize, 2), answers.len);
     try std.testing.expectEqual(@as(u32, 1), answers[0].line);
+    try std.testing.expectEqual(@as(f64, 0.42), answers[1].confidence.?);
     try std.testing.expectEqual(@as(f64, 0.5), answers[0].noul.?);
     try std.testing.expectEqual(@as(u32, 2), answers[1].line);
     try std.testing.expectEqualStrings("mediocre", answers[1].choice.?);
